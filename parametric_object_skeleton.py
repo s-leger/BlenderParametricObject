@@ -28,9 +28,6 @@ from bpy.types import Operator, PropertyGroup, Object, Panel
 from bpy.props import FloatProperty, IntProperty, CollectionProperty   
 
 class BmeshEdit():  
-    """
-        a class to help in mesh editing via bmesh
-    """ 
     @staticmethod
     def _start(context, o):
         """
@@ -43,91 +40,92 @@ class BmeshEdit():
         bm.verts.ensure_lookup_table()
         bm.faces.ensure_lookup_table()
         return bm
-    
+        
     @staticmethod
-    def _end(o):   
+    def _end(bm, o):   
         """
             private, end bmesh editing of active object
         """
         bmesh.update_edit_mesh(o.data, True)
         bpy.ops.object.mode_set(mode='OBJECT')
-    
+        bm.free()
+        
     @staticmethod
     def _matids(bm, matids):
+        """
+            private, setup material ids
+        """
         for i, matid in enumerate(matids):
             bm.faces[i].material_index = matid
-    
+
     @staticmethod
     def _uvs(bm, uvs):
+        """
+            private, setup uv coords
+        """
         layer = bm.loops.layers.uv.verify()
         l_i = len(uvs)
         for i, face in enumerate(bm.faces):
-            if i > l_i:
-                raise RuntimeError("Missing uvs for face {}".format(i))
-            l_j = len(uvs[i])
             for j, loop in enumerate(face.loops):
-                if j > l_j:
-                    raise RuntimeError("Missing uv {} for face {}".format(j, i))
                 loop[layer].uv = uvs[i][j]
     
     @staticmethod
-    def _verts(bm, verts):
-        for i, v in enumerate(verts):
-            bm.verts[i].co = v
-    
-    @staticmethod
-    def verts(context, o, verts):
+    def buildmesh(context, o, verts, faces, matids=None, uvs=None, weld=False, clean=False):
         """
-            update vertex position of active object
-        """
-        bm = BmeshEdit._start(context, o)
-        BmeshEdit._verts(bm, verts)
-        BmeshEdit._end(o)
-        
-    @staticmethod
-    def aspect(context, o, matids, uvs):
-        """
-            update material id and uvmap of active object
+            public, build/update mesh on active object
+            o : object
+            verts: array of vertex 3d coords
+            faces: array of faces verted indexes
+            matids: array of material indexes for each face
+            uvs: array of array of texture 2d coords for each face
         """
         bm = BmeshEdit._start(context, o)
-        BmeshEdit._matids(bm, matids)
-        BmeshEdit._uvs(bm, uvs)
-        BmeshEdit._end(o)
-    
+        bm.clear()
+        for v in verts:
+            bm.verts.new(v)
+        bm.verts.ensure_lookup_table()
+        for f in faces:
+            bm.faces.new([bm.verts[i] for i in f])
+        bm.faces.ensure_lookup_table()
+        if matids is not None:
+            BmeshEdit._matids(bm, matids)
+        if uvs is not None:
+            BmeshEdit._uvs(bm, uvs)
+        if weld:
+            bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.001)
+        BmeshEdit._end(bm, o)
+        if clean:
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.delete_loose()
+            bpy.ops.object.mode_set(mode='OBJECT')   
+            
 # ------------------------------------------------------------------
 # Define property class to store object parameters and update mesh
 # ------------------------------------------------------------------ 
-def update_size(self, context):
-    self.update(context, topology=False)
+def update(self, context):
+    self.update(context)
 
-def update_topology(self, context):
-    self.update(context, topology=True)
-  
 class ParametricObjectProperty(PropertyGroup):
-    """
-        Note:
-        Use update_size for property not changing mesh topology (number of vertices..)
-        Use update_topology for property changing mesh topology (number of vertices..)
-    """
     x = FloatProperty(
             name='width',
             min=0.25, max=10000,
             default=100.0, precision=2,
-            description='Width', update=update_size,
+            description='Width', update=update,
             )
             
     y = FloatProperty(
-        name='depth',
-        min=0.1, max=10000,
-        default=0.80, precision=2,
-        description='Depth', update=update_size,
-        )
+            name='depth',
+            min=0.1, max=10000,
+            default=0.80, precision=2,
+            description='Depth', update=update,
+            )
         
     z = FloatProperty(
             name='height',
             min=0.1, max=10000,
             default=2.0, precision=2,
-            description='Height', update=update_size,
+            description='Height', update=update,
             )
     
     @property
@@ -184,32 +182,15 @@ class ParametricObjectProperty(PropertyGroup):
         """
         return [0,0,0,0,0,0]
         
-    def buildmesh(self, context, m):
-        m.from_pydata(self.verts, [], self.faces)
-        m.update(calc_edges=True)
-    
     def update(self, context, topology=False):
         old = context.active_object
         o, props = OBJECT_PT_parametric_object.params(old)
         if props != self:
             return 
         
-        if topology:
-            o.select = True
-            context.scene.objects.active = o
-            # build a mesh when topology changes,
-            mesh = o.data
-            name = o.name
-            m = bpy.data.meshes.new("temp")
-            self.buildmesh(context, m)
-            o.data = m
-            bpy.data.meshes.remove(mesh)
-            m.name = name
-            BmeshEdit.aspect(context, o, self.matids, self.uvs)
-        else:
-            # update the mesh via bmesh
-            BmeshEdit.verts(context, o, self.verts)
-        
+        o.select = True
+        context.scene.objects.active = o
+        BmeshEdit.buildmesh(context, o, self.verts, self.faces, matids=self.matids, uvs=self.uvs)
         # restore context
         old.select = True
         context.scene.objects.active = old
@@ -237,19 +218,14 @@ class OBJECT_PT_parametric_object(Panel):
     @classmethod
     def params(cls, o):
         if cls.filter(o):
-            if 'ParametricObjectProperty' in o:
-                return o, o.ParametricObjectProperty[0]
-            else:
-                for child in o.children:
-                    o, props = cls.params(child)
-                    if props is not None:
-                        return o, props
+            if o.data is not None and 'ParametricObjectProperty' in o.data:
+                return o, o.data.ParametricObjectProperty[0]
         return o, None
         
     @classmethod
     def filter(cls, o):
         try:
-            return bool('ParametricObjectProperty' in o)
+            return bool(o.data is not None and 'ParametricObjectProperty' in o.data)
         except:
             return False
     
@@ -288,16 +264,16 @@ class OBJECT_OT_parametric_object(Operator):
         default=2.0, precision=2,
         description='height'
         )
-   
+    
     def create(self, context):
         """
             expose only basic params in operator
             use object property for other params
         """
-        m = bpy.data.meshes.new("Door")
-        o = bpy.data.objects.new("Door", m)
+        m = bpy.data.meshes.new("ParametricObject")
+        o = bpy.data.objects.new("ParametricObject", m)
         # attach parametric datablock
-        d = o.ParametricObjectProperty.add()
+        d = o.data.ParametricObjectProperty.add()
         # update params
         d.x = self.x
         d.y = self.y
@@ -307,7 +283,7 @@ class OBJECT_OT_parametric_object(Operator):
         o.select = True
         context.scene.objects.active = o
         # create mesh data
-        d.update(context, m, topology=True)
+        d.update(context, o)
         return o
     # -----------------------------------------------------
     # Execute
@@ -320,10 +296,10 @@ class OBJECT_OT_parametric_object(Operator):
         else:
             self.report({'WARNING'}, "Option only valid in Object mode")
             return {'CANCELLED'}
-     
+        
 def register(): 
     bpy.utils.register_class(ParametricObjectProperty)
-    Object.ParametricObjectProperty = CollectionProperty(type=ParametricObjectProperty)
+    Mesh.ParametricObjectProperty = CollectionProperty(type=ParametricObjectProperty)
     bpy.utils.register_class(OBJECT_PT_parametric_object)
     bpy.utils.register_class(OBJECT_OT_parametric_object)
 
@@ -331,7 +307,7 @@ def unregister():
     bpy.utils.unregister_class(OBJECT_OT_parametric_object)
     bpy.utils.unregister_class(OBJECT_PT_parametric_object)
     bpy.utils.unregister_class(ParametricObjectProperty)
-    del Object.ParametricObjectProperty
+    del Mesh.ParametricObjectProperty
 
 if __name__ == "__main__":
     register()
