@@ -42,7 +42,7 @@ bl_info = {
 
 
 import bpy
-from bpy.types import Operator, PropertyGroup, Object, Panel
+from bpy.types import Operator, PropertyGroup, Mesh, Panel
 from bpy.props import FloatProperty, CollectionProperty
 from .bmesh_utils import BmeshEdit
 from .simple_manipulator import Manipulable
