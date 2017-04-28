@@ -44,6 +44,7 @@ bl_info = {
 import bpy
 from bpy.types import Operator, PropertyGroup, Mesh, Panel
 from bpy.props import FloatProperty, CollectionProperty
+from mathutils import Vector
 from .bmesh_utils import BmeshEdit
 from .simple_manipulator import Manipulable
 
@@ -145,6 +146,11 @@ class ParametricObjectProperty(Manipulable, PropertyGroup):
 
         BmeshEdit.buildmesh(context, o, self.verts, self.faces, matids=self.matids, uvs=self.uvs)
 
+        # setup 3d points for gl manipulators
+        self.manipulators[0].set_pts([(0, 0, 0), (self.x, 0, 0), (1, 0, 0)])
+        self.manipulators[1].set_pts([(0, 0, 0), (0, self.y, 0), (-1, 0, 0)])
+        self.manipulators[2].set_pts([(self.x, 0, 0), (self.x, 0, self.z), (-1, 0, 0)])
+
         # restore context
         old.select = True
         context.scene.objects.active = old
@@ -231,27 +237,30 @@ class OBJECT_OT_parametric_object(Operator):
         """
         m = bpy.data.meshes.new("Parametric Object")
         o = bpy.data.objects.new("Parametric Object", m)
+
         # attach parametric datablock
-        d = o.ParametricObjectProperty.add()
+        d = m.ParametricObjectProperty.add()
+
         # update params
         d.x = self.x
         d.y = self.y
         d.z = self.z
+
+        # setup manipulators for on screen editing
+        s = d.manipulators.add()
+        s.prop1_name = "x"
+        s = d.manipulators.add()
+        s.prop1_name = "y"
+        s = d.manipulators.add()
+        s.normal = Vector((0, 1, 0))
+        s.prop1_name = "z"
+
         context.scene.objects.link(o)
         # make newly created object active
         o.select = True
         context.scene.objects.active = o
         # create mesh data
         d.update(context)
-
-        # setup manipulators for on screen editing
-        h = m.manipulators.add()
-        h.prop1_name = "x"
-        h = m.manipulators.add()
-        h.prop1_name = "y"
-        h = m.manipulators.add()
-        h.prop1_name = "z"
-
         return o
 
     def execute(self, context):
@@ -260,6 +269,8 @@ class OBJECT_OT_parametric_object(Operator):
             o = self.create(context)
             o.location = context.scene.cursor_location
             # activate manipulators at creation time
+            o.select = True
+            context.scene.objects.active = o
             bpy.ops.object.parametric_object_manipulate()
             return {'FINISHED'}
         else:
@@ -298,8 +309,8 @@ class OBJECT_OT_parametric_object_manipulate(Operator):
 # ------------------------------------------------------------------
 # Define a panel class to add button on Create panel under regular primitives
 # ------------------------------------------------------------------
-  
-  
+
+
 class TOOLS_PT_parametric_object(Panel):
     bl_label = "ParametricObject"
     bl_idname = "TOOLS_PT_parametric_object"
@@ -318,16 +329,16 @@ class TOOLS_PT_parametric_object(Panel):
         box.label("Objects")
         row = box.row(align=True)
         row.operator("object.parametric_object")
-        
+
 
 def register():
     bpy.utils.register_class(ParametricObjectProperty)
     Mesh.ParametricObjectProperty = CollectionProperty(type=ParametricObjectProperty)
+    bpy.utils.register_class(OBJECT_OT_parametric_object_manipulate)
     bpy.utils.register_class(OBJECT_PT_parametric_object)
     bpy.utils.register_class(OBJECT_OT_parametric_object)
-    bpy.utils.register_class(OBJECT_OT_parametric_object_manipulate)
     bpy.utils.register_class(TOOLS_PT_parametric_object)
-    
+
 
 def unregister():
     bpy.utils.unregister_class(TOOLS_PT_parametric_object)
