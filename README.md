@@ -1,7 +1,7 @@
 # BlenderParametricObject
 Parametric Object sample for Blender 2.78+
 
-## Archipack's devlopper guide
+## Archipack's developer guide
 https://github.com/s-leger/archipack/wiki/Parametric-Objects-developper-guide
 
 
